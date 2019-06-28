@@ -1,0 +1,43 @@
+#!/bin/bash
+
+function getAllPods() {
+   oc get pods -o json --all-namespaces | jq -r '.items[] | .metadata.namespace+";"+.metadata.name+";"+.status.phase+";"+.spec.containers[].image'
+}
+
+function getLabels() {
+    oc get images -o json "$1" | jq -r '.dockerImageMetadata.Config.Labels | .["url"]+";"+.["adoptopenjdk.version"]+";"+.["tomcat.version"]'
+}
+
+function generateReport() {
+    echo "Get list of all running pods"
+    pods="$(getAllPods)"
+
+    localImages=$(echo "$pods" | 
+        grep docker-registry.default.svc | 
+        awk -F';' '{ print $4 }' | 
+        grep "@sha256:" | 
+        awk -F'@' '{ print $2 }' | 
+        sort | uniq)
+
+
+    echo "Fetch all image labels"
+    declare -A labels
+    t=$(date --iso-8601=seconds)
+
+    for i in $localImages; do 
+        labels[${i/sha256:/}]="$(getLabels "$i")"
+    done
+
+    for p in $pods; do
+
+        if [[ "$p" =~ .*\;docker-registry.default.svc:5000\/.*@sha256:(.*) ]]; then
+            l=${labels[${BASH_REMATCH[1]}]}
+            echo "$t;$p;$l"
+        else
+            echo "$t;$p;"
+        fi
+    done
+
+}
+
+generateReport
